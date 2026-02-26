@@ -4,7 +4,7 @@ use foundation::errors::{FoundationError, FoundationResult};
 use foundation::id::{DeterministicId, EdgeDomain, GraphDomain, NodeDomain};
 use foundation::primitives::SafeFloat;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 /// A traversal path through a graph: an ordered list of node IDs and edges.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,40 +135,77 @@ impl Default for GraphQuery {
 }
 
 /// An adjacency list representation of a graph for algorithmic operations.
+///
+/// Internally uses compact index-based storage (`Vec<Vec<(usize, f64)>>`) for
+/// O(1) node lookups and cache-friendly traversal. String node IDs are mapped
+/// to `usize` indices at the API boundary via a `HashMap`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdjacencyList {
-    /// Map from node ID hex -> list of (neighbor ID hex, edge weight).
-    pub adjacency: BTreeMap<String, Vec<(String, SafeFloat)>>,
+    node_to_idx: HashMap<String, usize>,
+    idx_to_node: Vec<String>,
+    edges: Vec<Vec<(usize, f64)>>,
 }
 
 impl AdjacencyList {
     pub fn new() -> Self {
         AdjacencyList {
-            adjacency: BTreeMap::new(),
+            node_to_idx: HashMap::new(),
+            idx_to_node: Vec::new(),
+            edges: Vec::new(),
         }
     }
 
-    pub fn add_node(&mut self, node_id: &str) {
-        self.adjacency.entry(node_id.to_string()).or_default();
+    /// Add a node, returning its index. Idempotent.
+    pub fn add_node(&mut self, node_id: &str) -> usize {
+        if let Some(&idx) = self.node_to_idx.get(node_id) {
+            idx
+        } else {
+            let idx = self.idx_to_node.len();
+            self.node_to_idx.insert(node_id.to_string(), idx);
+            self.idx_to_node.push(node_id.to_string());
+            self.edges.push(Vec::new());
+            idx
+        }
     }
 
+    /// Add a directed edge. Implicitly adds both endpoints if absent.
     pub fn add_edge(&mut self, from: &str, to: &str, weight: SafeFloat) {
-        self.adjacency
-            .entry(from.to_string())
-            .or_default()
-            .push((to.to_string(), weight));
+        let from_idx = self.add_node(from);
+        let to_idx = self.add_node(to);
+        self.edges[from_idx].push((to_idx, weight.value()));
     }
 
-    pub fn neighbors(&self, node_id: &str) -> Option<&Vec<(String, SafeFloat)>> {
-        self.adjacency.get(node_id)
+    /// Look up a node's index by name.
+    #[inline]
+    pub fn node_index(&self, node_id: &str) -> Option<usize> {
+        self.node_to_idx.get(node_id).copied()
+    }
+
+    /// Get the name of a node by index.
+    #[inline]
+    pub fn node_name(&self, idx: usize) -> &str {
+        &self.idx_to_node[idx]
+    }
+
+    /// Get the neighbor list for a node by index: `&[(target_index, weight)]`.
+    #[inline]
+    pub fn neighbors_idx(&self, idx: usize) -> &[(usize, f64)] {
+        &self.edges[idx]
+    }
+
+    /// Get the neighbor list for a node by name.
+    pub fn neighbors(&self, node_id: &str) -> Option<&[(usize, f64)]> {
+        self.node_to_idx
+            .get(node_id)
+            .map(|&idx| self.edges[idx].as_slice())
     }
 
     pub fn node_count(&self) -> usize {
-        self.adjacency.len()
+        self.idx_to_node.len()
     }
 
     pub fn edge_count(&self) -> usize {
-        self.adjacency.values().map(|v| v.len()).sum()
+        self.edges.iter().map(|v| v.len()).sum()
     }
 }
 
