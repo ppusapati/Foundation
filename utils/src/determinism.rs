@@ -12,7 +12,7 @@ pub fn deterministic_sort<T: Ord>(slice: &mut [T]) {
 
 /// Sort by a key function (stable).
 pub fn deterministic_sort_by_key<T, K: Ord>(slice: &mut [T], key_fn: impl Fn(&T) -> K) {
-    slice.sort_by(|a, b| key_fn(a).cmp(&key_fn(b)));
+    slice.sort_by_key(|a| key_fn(a));
 }
 
 /// Deterministic iteration over a HashMap-like structure.
@@ -59,8 +59,8 @@ pub fn deterministic_select<T: Clone>(slice: &[T], k: usize, seed: u64) -> Vec<T
 
 /// Verify that two values produce the same canonical hash.
 pub fn verify_determinism<T: serde::Serialize>(a: &T, b: &T) -> FoundationResult<bool> {
-    let ha = hash::hash_json(a).map_err(|e| FoundationError::HashError(e))?;
-    let hb = hash::hash_json(b).map_err(|e| FoundationError::HashError(e))?;
+    let ha = hash::hash_json(a).map_err(FoundationError::HashError)?;
+    let hb = hash::hash_json(b).map_err(FoundationError::HashError)?;
     Ok(ha == hb)
 }
 
@@ -73,19 +73,19 @@ pub struct DeterminismGuard {
 impl DeterminismGuard {
     /// Begin a determinism guard by capturing the hash of the current state.
     pub fn begin<T: serde::Serialize>(value: &T) -> FoundationResult<Self> {
-        let h = hash::hash_json(value).map_err(|e| FoundationError::HashError(e))?;
+        let h = hash::hash_json(value).map_err(FoundationError::HashError)?;
         Ok(DeterminismGuard { hash_before: h })
     }
 
     /// Verify that the value has not changed since the guard was created.
     pub fn verify_unchanged<T: serde::Serialize>(&self, value: &T) -> FoundationResult<bool> {
-        let h = hash::hash_json(value).map_err(|e| FoundationError::HashError(e))?;
+        let h = hash::hash_json(value).map_err(FoundationError::HashError)?;
         Ok(self.hash_before == h)
     }
 
     /// Verify that the value HAS changed since the guard was created.
     pub fn verify_changed<T: serde::Serialize>(&self, value: &T) -> FoundationResult<bool> {
-        let h = hash::hash_json(value).map_err(|e| FoundationError::HashError(e))?;
+        let h = hash::hash_json(value).map_err(FoundationError::HashError)?;
         Ok(self.hash_before != h)
     }
 }

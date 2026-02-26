@@ -22,16 +22,19 @@ impl SafeInteger {
     pub const MAX: Self = SafeInteger(i64::MAX);
 
     /// Create a new `SafeInteger` from an `i64`.
+    #[inline]
     pub const fn new(value: i64) -> Self {
         SafeInteger(value)
     }
 
     /// Return the inner `i64`.
+    #[inline]
     pub const fn value(&self) -> i64 {
         self.0
     }
 
     /// Checked addition.
+    #[inline]
     pub fn checked_add(&self, rhs: SafeInteger) -> FoundationResult<SafeInteger> {
         self.0
             .checked_add(rhs.0)
@@ -40,6 +43,7 @@ impl SafeInteger {
     }
 
     /// Checked subtraction.
+    #[inline]
     pub fn checked_sub(&self, rhs: SafeInteger) -> FoundationResult<SafeInteger> {
         self.0
             .checked_sub(rhs.0)
@@ -48,6 +52,7 @@ impl SafeInteger {
     }
 
     /// Checked multiplication.
+    #[inline]
     pub fn checked_mul(&self, rhs: SafeInteger) -> FoundationResult<SafeInteger> {
         self.0
             .checked_mul(rhs.0)
@@ -144,6 +149,7 @@ impl SafeFloat {
     pub const EPSILON: f64 = 1e-10;
 
     /// Create a new `SafeFloat`, returning an error if the value is not finite.
+    #[inline]
     pub fn new(value: f64) -> FoundationResult<Self> {
         if value.is_finite() {
             Ok(SafeFloat(value))
@@ -164,21 +170,25 @@ impl SafeFloat {
     }
 
     /// Return the inner `f64`.
+    #[inline]
     pub const fn value(&self) -> f64 {
         self.0
     }
 
     /// Checked addition.
+    #[inline]
     pub fn checked_add(&self, rhs: SafeFloat) -> FoundationResult<SafeFloat> {
         SafeFloat::new(self.0 + rhs.0)
     }
 
     /// Checked subtraction.
+    #[inline]
     pub fn checked_sub(&self, rhs: SafeFloat) -> FoundationResult<SafeFloat> {
         SafeFloat::new(self.0 - rhs.0)
     }
 
     /// Checked multiplication.
+    #[inline]
     pub fn checked_mul(&self, rhs: SafeFloat) -> FoundationResult<SafeFloat> {
         SafeFloat::new(self.0 * rhs.0)
     }
@@ -251,7 +261,7 @@ pub struct Percentage(f64);
 
 impl Percentage {
     pub fn new(value: f64) -> FoundationResult<Self> {
-        if !value.is_finite() || value < 0.0 || value > 100.0 {
+        if !value.is_finite() || !(0.0..=100.0).contains(&value) {
             return Err(FoundationError::OutOfRange(format!(
                 "percentage must be in [0.0, 100.0], got {}",
                 value

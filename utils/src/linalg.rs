@@ -268,6 +268,7 @@ impl Matrix {
     }
 
     /// Matrix multiplication.
+    /// Uses direct indexing (bounds validated upfront) for inner loop performance.
     pub fn mul(&self, other: &Matrix) -> FoundationResult<Matrix> {
         if self.cols != other.rows {
             return Err(FoundationError::ValidationFailed(format!(
@@ -275,19 +276,24 @@ impl Matrix {
                 self.rows, self.cols, other.rows, other.cols
             )));
         }
-        let mut result = Matrix::zeros(self.rows, other.cols);
+        let mut data = vec![SafeFloat::ZERO; self.rows * other.cols];
         for i in 0..self.rows {
-            for j in 0..other.cols {
-                let mut sum = SafeFloat::ZERO;
-                for k in 0..self.cols {
-                    let a = self.get(i, k)?;
-                    let b = other.get(k, j)?;
-                    sum = sum.checked_add(a.checked_mul(b)?)?;
+            let row_base = i * self.cols;
+            let out_base = i * other.cols;
+            for k in 0..self.cols {
+                let a = self.data[row_base + k];
+                let k_base = k * other.cols;
+                for j in 0..other.cols {
+                    let prod = a.checked_mul(other.data[k_base + j])?;
+                    data[out_base + j] = data[out_base + j].checked_add(prod)?;
                 }
-                result.set(i, j, sum)?;
             }
         }
-        Ok(result)
+        Ok(Matrix {
+            rows: self.rows,
+            cols: other.cols,
+            data,
+        })
     }
 
     /// Transpose.
@@ -313,14 +319,14 @@ impl Matrix {
             ));
         }
         let mut result = vec![SafeFloat::ZERO; self.rows];
-        for i in 0..self.rows {
+        for (i, result_elem) in result.iter_mut().enumerate() {
             let mut sum = SafeFloat::ZERO;
             for j in 0..self.cols {
-                let a = self.get(i, j)?;
+                let a = self.data[i * self.cols + j];
                 let b = v.get(j)?;
                 sum = sum.checked_add(a.checked_mul(b)?)?;
             }
-            result[i] = sum;
+            *result_elem = sum;
         }
         Ok(Vector::new(result))
     }
@@ -355,7 +361,7 @@ impl Matrix {
         }
         let mut sum = SafeFloat::ZERO;
         for i in 0..self.rows {
-            sum = sum.checked_add(self.get(i, i)?)?;
+            sum = sum.checked_add(self.data[i * self.cols + i])?;
         }
         Ok(sum)
     }

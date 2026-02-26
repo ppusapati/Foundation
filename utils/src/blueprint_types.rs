@@ -216,13 +216,14 @@ impl BlueprintInstance {
     ) -> FoundationResult<Self> {
         // Check required parameters
         for param in &blueprint.parameters {
-            if param.required && !parameter_values.contains_key(&param.name) {
-                if param.default_value.is_none() {
-                    return Err(FoundationError::ValidationFailed(format!(
-                        "required parameter '{}' not provided",
-                        param.name
-                    )));
-                }
+            if param.required
+                && !parameter_values.contains_key(&param.name)
+                && param.default_value.is_none()
+            {
+                return Err(FoundationError::ValidationFailed(format!(
+                    "required parameter '{}' not provided",
+                    param.name
+                )));
             }
         }
         let instance_id = format!(
@@ -231,7 +232,7 @@ impl BlueprintInstance {
             ts.value()
         );
         Ok(BlueprintInstance {
-            blueprint_id: blueprint.id.clone(),
+            blueprint_id: blueprint.id,
             instance_id,
             parameter_values,
             created_at: ts,

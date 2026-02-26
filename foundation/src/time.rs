@@ -15,10 +15,12 @@ pub struct LogicalTimestamp(u64);
 impl LogicalTimestamp {
     pub const ZERO: Self = LogicalTimestamp(0);
 
+    #[inline]
     pub const fn new(value: u64) -> Self {
         LogicalTimestamp(value)
     }
 
+    #[inline]
     pub const fn value(&self) -> u64 {
         self.0
     }

@@ -3,12 +3,14 @@
 use sha2::{Digest, Sha256};
 
 /// Compute the SHA-256 hash of a byte slice and return it as a hex string.
+#[inline]
 pub fn sha256_hex(data: &[u8]) -> String {
     let hash = Sha256::digest(data);
     hex_encode(&hash)
 }
 
 /// Compute the SHA-256 hash of a string and return it as a hex string.
+#[inline]
 pub fn sha256_str(s: &str) -> String {
     sha256_hex(s.as_bytes())
 }
@@ -24,6 +26,7 @@ pub fn sha256_parts(parts: &[&[u8]]) -> String {
 }
 
 /// Compute the raw SHA-256 bytes of a byte slice.
+#[inline]
 pub fn sha256_bytes(data: &[u8]) -> [u8; 32] {
     let hash = Sha256::digest(data);
     let mut out = [0u8; 32];
@@ -37,10 +40,13 @@ pub fn hash_json<T: serde::Serialize>(value: &T) -> Result<String, String> {
     Ok(sha256_str(&json))
 }
 
+const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
+
 fn hex_encode(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        s.push_str(&format!("{:02x}", b));
+    for &b in bytes {
+        s.push(HEX_CHARS[(b >> 4) as usize] as char);
+        s.push(HEX_CHARS[(b & 0x0f) as usize] as char);
     }
     s
 }

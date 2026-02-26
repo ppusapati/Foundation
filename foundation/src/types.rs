@@ -111,7 +111,7 @@ impl NodeData {
 impl Identifiable for NodeData {
     type Domain = NodeDomain;
     fn id(&self) -> DeterministicId<NodeDomain> {
-        self.id.clone()
+        self.id
     }
 }
 
@@ -184,7 +184,7 @@ impl EdgeData {
 impl Identifiable for EdgeData {
     type Domain = EdgeDomain;
     fn id(&self) -> DeterministicId<EdgeDomain> {
-        self.id.clone()
+        self.id
     }
 }
 
@@ -258,7 +258,7 @@ impl GraphMetadata {
 impl Identifiable for GraphMetadata {
     type Domain = GraphDomain;
     fn id(&self) -> DeterministicId<GraphDomain> {
-        self.id.clone()
+        self.id
     }
 }
 
@@ -438,7 +438,7 @@ mod tests {
     fn edge_self_loop_invalid() {
         let id = DeterministicId::from_content("a");
         let edge = EdgeData::new(
-            id.clone(),
+            id,
             id,
             "self",
             SafeFloat::ONE,

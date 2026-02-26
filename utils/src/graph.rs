@@ -13,26 +13,25 @@ pub fn bfs(graph: &AdjacencyList, source: &str) -> FoundationResult<Vec<String>>
         )));
     }
 
+    let node_count = graph.adjacency.len();
     let mut visited = BTreeSet::new();
-    let mut queue = VecDeque::new();
-    let mut result = Vec::new();
+    let mut queue = VecDeque::with_capacity(node_count);
+    let mut result = Vec::with_capacity(node_count);
 
     visited.insert(source.to_string());
     queue.push_back(source.to_string());
 
     while let Some(node) = queue.pop_front() {
-        result.push(node.clone());
         if let Some(neighbors) = graph.neighbors(&node) {
-            // Sort neighbors for deterministic order
             let mut sorted_neighbors: Vec<_> = neighbors.iter().collect();
-            sorted_neighbors.sort_by(|a, b| a.0.cmp(&b.0));
+            sorted_neighbors.sort_by_key(|(name, _)| name.clone());
             for (neighbor, _) in sorted_neighbors {
-                if !visited.contains(neighbor) {
-                    visited.insert(neighbor.clone());
+                if visited.insert(neighbor.clone()) {
                     queue.push_back(neighbor.clone());
                 }
             }
         }
+        result.push(node);
     }
 
     Ok(result)
@@ -63,7 +62,7 @@ fn dfs_recursive(
     result.push(node.to_string());
     if let Some(neighbors) = graph.neighbors(node) {
         let mut sorted_neighbors: Vec<_> = neighbors.iter().collect();
-        sorted_neighbors.sort_by(|a, b| a.0.cmp(&b.0));
+        sorted_neighbors.sort_by_key(|(name, _)| name.clone());
         for (neighbor, _) in sorted_neighbors {
             if !visited.contains(neighbor) {
                 dfs_recursive(graph, neighbor, visited, result);
@@ -97,12 +96,11 @@ pub fn topological_sort(graph: &AdjacencyList) -> FoundationResult<Vec<String>> 
         queue.push_back(node.clone());
     }
 
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(in_degree.len());
     while let Some(node) = queue.pop_front() {
-        result.push(node.clone());
         if let Some(neighbors) = graph.adjacency.get(&node) {
             let mut sorted: Vec<_> = neighbors.iter().collect();
-            sorted.sort_by(|a, b| a.0.cmp(&b.0));
+            sorted.sort_by_key(|(name, _)| name.clone());
             for (neighbor, _) in sorted {
                 if let Some(deg) = in_degree.get_mut(neighbor) {
                     *deg -= 1;
@@ -112,6 +110,7 @@ pub fn topological_sort(graph: &AdjacencyList) -> FoundationResult<Vec<String>> 
                 }
             }
         }
+        result.push(node);
     }
 
     if result.len() != in_degree.len() {
@@ -123,12 +122,15 @@ pub fn topological_sort(graph: &AdjacencyList) -> FoundationResult<Vec<String>> 
     Ok(result)
 }
 
-/// Dijkstra's shortest path algorithm.
+/// Dijkstra's shortest path algorithm using a BinaryHeap for O((V+E) log V).
 /// Returns (distances, predecessors) from the source node.
 pub fn dijkstra(
     graph: &AdjacencyList,
     source: &str,
 ) -> FoundationResult<(BTreeMap<String, f64>, BTreeMap<String, String>)> {
+    use std::cmp::Ordering;
+    use std::collections::BinaryHeap;
+
     if graph.neighbors(source).is_none() {
         return Err(FoundationError::ValidationFailed(format!(
             "source node '{}' not in graph",
@@ -136,41 +138,66 @@ pub fn dijkstra(
         )));
     }
 
+    /// Priority queue entry: wraps f64 distance for min-heap ordering.
+    /// Ties are broken by node name for determinism.
+    #[derive(PartialEq)]
+    struct State {
+        dist: f64,
+        node: String,
+    }
+    impl Eq for State {}
+    impl PartialOrd for State {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+    impl Ord for State {
+        fn cmp(&self, other: &Self) -> Ordering {
+            // Reverse for min-heap, then break ties deterministically by name
+            other
+                .dist
+                .partial_cmp(&self.dist)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| other.node.cmp(&self.node))
+        }
+    }
+
     let mut dist: BTreeMap<String, f64> = BTreeMap::new();
     let mut pred: BTreeMap<String, String> = BTreeMap::new();
-    let mut visited: BTreeSet<String> = BTreeSet::new();
+    let mut heap = BinaryHeap::new();
 
     for node in graph.adjacency.keys() {
         dist.insert(node.clone(), f64::MAX);
     }
     dist.insert(source.to_string(), 0.0);
+    heap.push(State {
+        dist: 0.0,
+        node: source.to_string(),
+    });
 
-    loop {
-        // Find unvisited node with minimum distance (deterministic via BTreeMap order)
-        let mut min_node = None;
-        let mut min_dist = f64::MAX;
-        for (node, &d) in &dist {
-            if !visited.contains(node) && d < min_dist {
-                min_dist = d;
-                min_node = Some(node.clone());
+    while let Some(State {
+        dist: current_dist,
+        node: current,
+    }) = heap.pop()
+    {
+        // Skip if we already found a shorter path
+        if let Some(&best) = dist.get(&current) {
+            if current_dist > best {
+                continue;
             }
         }
 
-        let current = match min_node {
-            Some(n) => n,
-            None => break,
-        };
-
-        visited.insert(current.clone());
-
         if let Some(neighbors) = graph.neighbors(&current) {
             for (neighbor, weight) in neighbors {
-                let alt = min_dist + weight.value();
-                if let Some(current_dist) = dist.get(neighbor) {
-                    if alt < *current_dist {
-                        dist.insert(neighbor.clone(), alt);
-                        pred.insert(neighbor.clone(), current.clone());
-                    }
+                let alt = current_dist + weight.value();
+                let current_best = dist.get(neighbor).copied().unwrap_or(f64::MAX);
+                if alt < current_best {
+                    dist.insert(neighbor.clone(), alt);
+                    pred.insert(neighbor.clone(), current.clone());
+                    heap.push(State {
+                        dist: alt,
+                        node: neighbor.clone(),
+                    });
                 }
             }
         }
@@ -254,7 +281,7 @@ pub fn has_cycle(graph: &AdjacencyList) -> bool {
         color.insert(node.to_string(), Color::Gray);
         if let Some(neighbors) = graph.neighbors(node) {
             let mut sorted: Vec<_> = neighbors.iter().collect();
-            sorted.sort_by(|a, b| a.0.cmp(&b.0));
+            sorted.sort_by_key(|(name, _)| name.clone());
             for (neighbor, _) in sorted {
                 match color.get(neighbor) {
                     Some(Color::Gray) => return true,
@@ -273,10 +300,10 @@ pub fn has_cycle(graph: &AdjacencyList) -> bool {
 
     let nodes: Vec<String> = graph.adjacency.keys().cloned().collect();
     for node in &nodes {
-        if color.get(node) == Some(&Color::White) {
-            if visit(node, graph, &mut color) {
-                return true;
-            }
+        if color.get(node) == Some(&Color::White)
+            && visit(node, graph, &mut color)
+        {
+            return true;
         }
     }
     false

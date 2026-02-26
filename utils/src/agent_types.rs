@@ -73,19 +73,19 @@ impl AgentProfile {
     }
 
     pub fn transition_to(&mut self, new_state: AgentState, ts: LogicalTimestamp) -> FoundationResult<()> {
-        let valid = match (self.state, new_state) {
-            (AgentState::Idle, AgentState::Planning) => true,
-            (AgentState::Planning, AgentState::Executing) => true,
-            (AgentState::Executing, AgentState::Waiting) => true,
-            (AgentState::Executing, AgentState::Completed) => true,
-            (AgentState::Executing, AgentState::Failed) => true,
-            (AgentState::Waiting, AgentState::Executing) => true,
-            (_, AgentState::Suspended) => true,
-            (AgentState::Suspended, AgentState::Idle) => true,
-            (AgentState::Failed, AgentState::Idle) => true,
-            (AgentState::Completed, AgentState::Idle) => true,
-            _ => false,
-        };
+        let valid = matches!(
+            (self.state, new_state),
+            (AgentState::Idle, AgentState::Planning)
+                | (AgentState::Planning, AgentState::Executing)
+                | (AgentState::Executing, AgentState::Waiting)
+                | (AgentState::Executing, AgentState::Completed)
+                | (AgentState::Executing, AgentState::Failed)
+                | (AgentState::Waiting, AgentState::Executing)
+                | (_, AgentState::Suspended)
+                | (AgentState::Suspended, AgentState::Idle)
+                | (AgentState::Failed, AgentState::Idle)
+                | (AgentState::Completed, AgentState::Idle)
+        );
         if !valid {
             return Err(FoundationError::ValidationFailed(format!(
                 "invalid state transition: {} -> {}",
