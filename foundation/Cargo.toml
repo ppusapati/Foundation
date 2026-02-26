@@ -1,0 +1,17 @@
+[package]
+name = "foundation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Foundation crate: deterministic types, context, traits, transport, IDs, crypto, and errors"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+[features]
+default = []
+strict = []

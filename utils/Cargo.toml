@@ -1,0 +1,16 @@
+[package]
+name = "utils"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Utils crate: math, linalg, graph, validation, audit, and determinism helpers"
+
+[dependencies]
+foundation = { path = "../foundation" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+
+[features]
+default = []
+strict = []
