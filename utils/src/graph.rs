@@ -4,12 +4,19 @@
 //! Internally they use `Vec<bool>` for visited sets, `Vec<f64>` for distances, and
 //! `usize` node indices throughout the hot loop, converting back to `String` node IDs
 //! only at the return boundary.
+//!
+//! For deterministic traversal order (BFS, DFS, topological sort), call
+//! [`AdjacencyList::compact()`] after construction. This pre-sorts edge lists
+//! by target node name and converts to CSR format, so algorithms iterate
+//! contiguous slices with zero per-visit allocation or sorting.
 
 use crate::graph_types::AdjacencyList;
 use foundation::errors::{FoundationError, FoundationResult};
 use std::collections::{BTreeMap, BinaryHeap, VecDeque};
 
 /// Breadth-first search from a source node. Returns nodes in BFS order.
+///
+/// For deterministic output, the graph should be compacted first.
 pub fn bfs(graph: &AdjacencyList, source: &str) -> FoundationResult<Vec<String>> {
     let src = graph.node_index(source).ok_or_else(|| {
         FoundationError::ValidationFailed(format!("source node '{}' not in graph", source))
@@ -25,10 +32,7 @@ pub fn bfs(graph: &AdjacencyList, source: &str) -> FoundationResult<Vec<String>>
 
     while let Some(node) = queue.pop_front() {
         result.push(graph.node_name(node).to_string());
-        // Sort neighbors by name for deterministic traversal order
-        let mut neighbors: Vec<(usize, f64)> = graph.neighbors_idx(node).to_vec();
-        neighbors.sort_unstable_by(|a, b| graph.node_name(a.0).cmp(graph.node_name(b.0)));
-        for (neighbor, _) in neighbors {
+        for &(neighbor, _) in graph.neighbors_idx(node) {
             if !visited[neighbor] {
                 visited[neighbor] = true;
                 queue.push_back(neighbor);
@@ -41,6 +45,8 @@ pub fn bfs(graph: &AdjacencyList, source: &str) -> FoundationResult<Vec<String>>
 
 /// Depth-first search from a source node. Returns nodes in DFS pre-order.
 /// Uses an explicit stack to avoid stack overflow on deep graphs.
+///
+/// For deterministic output, the graph should be compacted first.
 pub fn dfs(graph: &AdjacencyList, source: &str) -> FoundationResult<Vec<String>> {
     let src = graph.node_index(source).ok_or_else(|| {
         FoundationError::ValidationFailed(format!("source node '{}' not in graph", source))
@@ -57,12 +63,8 @@ pub fn dfs(graph: &AdjacencyList, source: &str) -> FoundationResult<Vec<String>>
         }
         visited[node] = true;
         result.push(graph.node_name(node).to_string());
-        // Push neighbors in reverse sorted-by-name order so the first
-        // alphabetical neighbor is popped (and visited) next.
-        let mut neighbors: Vec<usize> =
-            graph.neighbors_idx(node).iter().map(|&(n, _)| n).collect();
-        neighbors.sort_unstable_by(|&a, &b| graph.node_name(a).cmp(graph.node_name(b)));
-        for &neighbor in neighbors.iter().rev() {
+        // Iterate pre-sorted neighbors in reverse so first-sorted is popped next
+        for &(neighbor, _) in graph.neighbors_idx(node).iter().rev() {
             if !visited[neighbor] {
                 stack.push(neighbor);
             }
@@ -73,6 +75,8 @@ pub fn dfs(graph: &AdjacencyList, source: &str) -> FoundationResult<Vec<String>>
 }
 
 /// Topological sort (Kahn's algorithm). Returns an error if the graph has a cycle.
+///
+/// For deterministic output, the graph should be compacted first.
 pub fn topological_sort(graph: &AdjacencyList) -> FoundationResult<Vec<String>> {
     let n = graph.node_count();
     let mut in_degree = vec![0usize; n];
@@ -91,9 +95,7 @@ pub fn topological_sort(graph: &AdjacencyList) -> FoundationResult<Vec<String>> 
     let mut result = Vec::with_capacity(n);
 
     while let Some(node) = queue.pop_front() {
-        let mut neighbors: Vec<(usize, f64)> = graph.neighbors_idx(node).to_vec();
-        neighbors.sort_unstable_by(|a, b| graph.node_name(a.0).cmp(graph.node_name(b.0)));
-        for (neighbor, _) in neighbors {
+        for &(neighbor, _) in graph.neighbors_idx(node) {
             in_degree[neighbor] -= 1;
             if in_degree[neighbor] == 0 {
                 queue.push_back(neighbor);
@@ -316,6 +318,7 @@ mod tests {
         g.add_edge("a", "c", SafeFloat::new(2.0).unwrap());
         g.add_edge("b", "d", SafeFloat::ONE);
         g.add_edge("c", "d", SafeFloat::ONE);
+        g.compact();
         g
     }
 
@@ -356,6 +359,7 @@ mod tests {
         g.add_node("b");
         g.add_edge("a", "b", SafeFloat::ONE);
         g.add_edge("b", "a", SafeFloat::ONE);
+        g.compact();
         assert!(topological_sort(&g).is_err());
     }
 
@@ -390,6 +394,7 @@ mod tests {
         g.add_node("b");
         g.add_edge("a", "b", SafeFloat::ONE);
         g.add_edge("b", "a", SafeFloat::ONE);
+        g.compact();
         assert!(has_cycle(&g));
     }
 
@@ -401,6 +406,7 @@ mod tests {
         g.add_node("c");
         g.add_edge("a", "b", SafeFloat::ONE);
         // c is isolated
+        g.compact();
         let components = connected_components(&g);
         assert_eq!(components.len(), 2);
     }

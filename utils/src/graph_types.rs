@@ -134,16 +134,32 @@ impl Default for GraphQuery {
     }
 }
 
+/// Internal edge storage: either mutable per-node lists (construction phase)
+/// or a flat CSR array with pre-sorted edges (query phase).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum EdgeStorage {
+    /// Per-node edge lists used during incremental construction.
+    Lists(Vec<Vec<(usize, f64)>>),
+    /// Compressed Sparse Row: edges for node `i` live at
+    /// `edges[offsets[i]..offsets[i+1]]`, pre-sorted by target node name.
+    Csr {
+        offsets: Vec<usize>,
+        edges: Vec<(usize, f64)>,
+    },
+}
+
 /// An adjacency list representation of a graph for algorithmic operations.
 ///
-/// Internally uses compact index-based storage (`Vec<Vec<(usize, f64)>>`) for
-/// O(1) node lookups and cache-friendly traversal. String node IDs are mapped
-/// to `usize` indices at the API boundary via a `HashMap`.
+/// Uses `HashMap<String, usize>` for O(1) name-to-index mapping. After
+/// construction, call [`compact()`](Self::compact) to convert to Compressed
+/// Sparse Row (CSR) format with edges pre-sorted by target node name.
+/// Algorithms can then iterate `neighbors_idx()` directly with zero per-visit
+/// allocation or sorting.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdjacencyList {
     node_to_idx: HashMap<String, usize>,
     idx_to_node: Vec<String>,
-    edges: Vec<Vec<(usize, f64)>>,
+    storage: EdgeStorage,
 }
 
 impl AdjacencyList {
@@ -151,28 +167,72 @@ impl AdjacencyList {
         AdjacencyList {
             node_to_idx: HashMap::new(),
             idx_to_node: Vec::new(),
-            edges: Vec::new(),
+            storage: EdgeStorage::Lists(Vec::new()),
         }
     }
 
     /// Add a node, returning its index. Idempotent.
     pub fn add_node(&mut self, node_id: &str) -> usize {
         if let Some(&idx) = self.node_to_idx.get(node_id) {
-            idx
-        } else {
-            let idx = self.idx_to_node.len();
-            self.node_to_idx.insert(node_id.to_string(), idx);
-            self.idx_to_node.push(node_id.to_string());
-            self.edges.push(Vec::new());
-            idx
+            return idx;
         }
+        let idx = self.idx_to_node.len();
+        self.node_to_idx.insert(node_id.to_string(), idx);
+        self.idx_to_node.push(node_id.to_string());
+        match &mut self.storage {
+            EdgeStorage::Lists(lists) => lists.push(Vec::new()),
+            EdgeStorage::Csr { .. } => {
+                panic!("cannot add nodes after compact(); build the graph first")
+            }
+        }
+        idx
     }
 
     /// Add a directed edge. Implicitly adds both endpoints if absent.
     pub fn add_edge(&mut self, from: &str, to: &str, weight: SafeFloat) {
         let from_idx = self.add_node(from);
         let to_idx = self.add_node(to);
-        self.edges[from_idx].push((to_idx, weight.value()));
+        match &mut self.storage {
+            EdgeStorage::Lists(lists) => lists[from_idx].push((to_idx, weight.value())),
+            EdgeStorage::Csr { .. } => {
+                panic!("cannot add edges after compact(); build the graph first")
+            }
+        }
+    }
+
+    /// Compact into CSR format with edges pre-sorted by target node name.
+    ///
+    /// After compaction, `neighbors_idx()` returns deterministically ordered
+    /// contiguous slices from a single flat array — no per-query allocation or
+    /// sorting is needed. Call this once after all nodes and edges are added.
+    /// Idempotent: calling on an already-compacted graph is a no-op.
+    pub fn compact(&mut self) {
+        let old = std::mem::replace(&mut self.storage, EdgeStorage::Lists(Vec::new()));
+        let mut lists = match old {
+            EdgeStorage::Lists(l) => l,
+            csr @ EdgeStorage::Csr { .. } => {
+                self.storage = csr;
+                return;
+            }
+        };
+
+        let names = &self.idx_to_node;
+        for list in &mut lists {
+            list.sort_unstable_by(|a, b| names[a.0].cmp(&names[b.0]));
+        }
+
+        let total: usize = lists.iter().map(|l| l.len()).sum();
+        let mut offsets = Vec::with_capacity(lists.len() + 1);
+        let mut edges = Vec::with_capacity(total);
+        let mut offset = 0;
+        for list in &lists {
+            offsets.push(offset);
+            edges.extend_from_slice(list);
+            offset += list.len();
+        }
+        offsets.push(offset);
+
+        self.storage = EdgeStorage::Csr { offsets, edges };
     }
 
     /// Look up a node's index by name.
@@ -188,16 +248,20 @@ impl AdjacencyList {
     }
 
     /// Get the neighbor list for a node by index: `&[(target_index, weight)]`.
+    /// After `compact()`, this is a zero-copy slice into the CSR array.
     #[inline]
     pub fn neighbors_idx(&self, idx: usize) -> &[(usize, f64)] {
-        &self.edges[idx]
+        match &self.storage {
+            EdgeStorage::Lists(lists) => &lists[idx],
+            EdgeStorage::Csr { offsets, edges } => &edges[offsets[idx]..offsets[idx + 1]],
+        }
     }
 
     /// Get the neighbor list for a node by name.
     pub fn neighbors(&self, node_id: &str) -> Option<&[(usize, f64)]> {
         self.node_to_idx
             .get(node_id)
-            .map(|&idx| self.edges[idx].as_slice())
+            .map(|&idx| self.neighbors_idx(idx))
     }
 
     pub fn node_count(&self) -> usize {
@@ -205,7 +269,15 @@ impl AdjacencyList {
     }
 
     pub fn edge_count(&self) -> usize {
-        self.edges.iter().map(|v| v.len()).sum()
+        match &self.storage {
+            EdgeStorage::Lists(lists) => lists.iter().map(|v| v.len()).sum(),
+            EdgeStorage::Csr { edges, .. } => edges.len(),
+        }
+    }
+
+    /// Returns `true` if the graph has been compacted into CSR format.
+    pub fn is_compacted(&self) -> bool {
+        matches!(self.storage, EdgeStorage::Csr { .. })
     }
 }
 
@@ -255,6 +327,18 @@ mod tests {
         assert_eq!(adj.node_count(), 2);
         assert_eq!(adj.edge_count(), 1);
         assert_eq!(adj.neighbors("a").unwrap().len(), 1);
+        assert!(!adj.is_compacted());
+
+        // Compact into CSR and verify same results
+        adj.compact();
+        assert!(adj.is_compacted());
+        assert_eq!(adj.node_count(), 2);
+        assert_eq!(adj.edge_count(), 1);
+        assert_eq!(adj.neighbors("a").unwrap().len(), 1);
+
+        // Idempotent
+        adj.compact();
+        assert!(adj.is_compacted());
     }
 
     #[test]
